@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heavy_elephant"
+version = "3.0.0"
+description = "PS5 Security Research Toolkit"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "Heavy Elephant Contributors"}
+]
+keywords = ["ps5", "security", "research", "cryptography", "firmware"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security :: Cryptography",
+]
+
+dependencies = [
+    "pycryptodome>=3.19.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+ps5-boot-decrypt = "tools.ps5_boot_decrypt:main"
+ps5-pkg-tool = "tools.ps5_pkg_tool:cli"
+ps5-self-tool = "tools.ps5_self_tool:cli"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/heavy_elephant"
+Repository = "https://github.com/yourusername/heavy_elephant"
+Issues = "https://github.com/yourusername/heavy_elephant/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "docs*"]

@@ -1,0 +1,5 @@
+{
+  "_comment": "Example SELF cipher keys - replace with actual keys for research",
+  "cipher_key": "00000000000000000000000000000000",
+  "cipher_iv": "00000000000000000000000000000000"
+}

@@ -1,0 +1,10 @@
+{
+  "_comment": "Example PKG RSA keys - replace with actual keys for research",
+  "n": "PLACEHOLDER_MODULUS",
+  "e": "010001",
+  "d": "PLACEHOLDER_PRIVATE_EXPONENT",
+  "p": "PLACEHOLDER_PRIME_P",
+  "q": "PLACEHOLDER_PRIME_Q",
+  "ekpfs": "00000000000000000000000000000000",
+  "content_key": "00000000000000000000000000000000"
+}
