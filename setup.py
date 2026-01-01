@@ -17,7 +17,7 @@ setup(
     description="PS5 Security Research Toolkit",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/heavy_elephant",
+    url="https://github.com/pookNast/heavy_elephant",
     packages=find_packages(exclude=["tests", "tests.*", "docs"]),
     python_requires=">=3.11",
     install_requires=[
@@ -52,7 +52,7 @@ setup(
     ],
     keywords="ps5, security, research, cryptography, firmware",
     project_urls={
-        "Bug Reports": "https://github.com/yourusername/heavy_elephant/issues",
-        "Source": "https://github.com/yourusername/heavy_elephant",
+        "Bug Reports": "https://github.com/pookNast/heavy_elephant/issues",
+        "Source": "https://github.com/pookNast/heavy_elephant",
     },
 )

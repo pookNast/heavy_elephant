@@ -43,9 +43,9 @@ ps5-pkg-tool = "tools.ps5_pkg_tool:cli"
 ps5-self-tool = "tools.ps5_self_tool:cli"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/heavy_elephant"
-Repository = "https://github.com/yourusername/heavy_elephant"
-Issues = "https://github.com/yourusername/heavy_elephant/issues"
+Homepage = "https://github.com/pookNast/heavy_elephant"
+Repository = "https://github.com/pookNast/heavy_elephant"
+Issues = "https://github.com/pookNast/heavy_elephant/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
