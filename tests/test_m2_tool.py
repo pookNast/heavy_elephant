@@ -71,10 +71,10 @@ def create_test_metadata(
             elif isinstance(value, bytes):
                 metadata[offset:offset + len(value)] = value
 
-    # Calculate checksum (SHA-256 of first 0x1F0 bytes)
-    checksum_data = metadata[0:0x1F0]
+    # Calculate checksum (SHA-256 of first 0x1E0 bytes)
+    checksum_data = metadata[0:0x1E0]
     checksum = hashlib.sha256(checksum_data).digest()
-    metadata[0x1F0:0x210] = checksum[:32]
+    metadata[0x1E0:0x200] = checksum[:32]
 
     return bytes(metadata)
 
@@ -97,10 +97,11 @@ def create_test_m2_image(
 
     # Encrypt if requested
     if encrypted:
-        iv = b'\x00' * 16
         encrypted_data = bytearray()
         for i in range(sector_count):
             sector = sector_data[i * M2_SECTOR_SIZE:(i + 1) * M2_SECTOR_SIZE]
+            # Use sector-index-based IV derivation (matches M2Cipher._derive_iv)
+            iv = struct.pack('<QQ', i, 0)
             encrypted_sector = aes_cbc_encrypt_no_pad(TEST_ENCRYPTION_KEY, iv, sector)
             encrypted_data.extend(encrypted_sector)
         sector_data = bytes(encrypted_data)
@@ -192,7 +193,7 @@ class TestMetadataVerification:
         """Test that corrupted checksum fails verification."""
         metadata_data = bytearray(create_test_metadata())
         # Corrupt the checksum
-        metadata_data[0x1F0] ^= 0xFF
+        metadata_data[0x1E0] ^= 0xFF
 
         assert not verify_metadata(bytes(metadata_data), TEST_METADATA_KEY)
 
@@ -249,10 +250,9 @@ class TestM2Cipher:
             b'\x44' * M2_SECTOR_SIZE,
         ]
 
-        iv = b'\x00' * 16
-
-        # Encrypt and decrypt each sector
+        # Encrypt and decrypt each sector using sector-index-based IV
         for i, plaintext in enumerate(sectors):
+            iv = struct.pack('<QQ', i, 0)  # Match M2Cipher._derive_iv
             ciphertext = aes_cbc_encrypt_no_pad(TEST_ENCRYPTION_KEY, iv, plaintext)
             decrypted = cipher.decrypt_sector(ciphertext, sector_index=i)
             assert decrypted == plaintext
@@ -477,29 +477,39 @@ class TestCLI:
         for cmd in expected_commands:
             assert cmd in cli.commands, f"Missing command: {cmd}"
 
-    @patch('builtins.open', new_callable=mock_open, read_data=create_test_m2_image())
-    def test_cli_info_command(self, mock_file):
+    def test_cli_info_command(self, tmp_path):
         """Test info command execution."""
         from tools.ps5_m2_tool import cli
         from click.testing import CliRunner
 
+        # Create a real temp file
+        test_file = tmp_path / "test.img"
+        test_file.write_bytes(create_test_m2_image())
+
         runner = CliRunner()
-        result = runner.invoke(cli, ['info', 'test.img'])
+        result = runner.invoke(cli, ['info', str(test_file)])
 
         assert result.exit_code == 0
-        assert 'M.2' in result.output or 'metadata' in result.output.lower()
+        assert 'M.2' in result.output or 'Storage' in result.output
 
-    @patch('builtins.open', new_callable=mock_open, read_data=create_test_m2_image(encrypted=True))
-    def test_cli_verify_command(self, mock_file):
+    def test_cli_verify_command(self, tmp_path):
         """Test verify command execution."""
         from tools.ps5_m2_tool import cli
         from click.testing import CliRunner
 
-        runner = CliRunner()
-        result = runner.invoke(cli, ['verify', 'test.img'])
+        # Create a real temp file
+        test_file = tmp_path / "test.img"
+        test_file.write_bytes(create_test_m2_image(encrypted=True))
 
-        # Should complete without error
-        assert result.exit_code in [0, 1]  # 0=valid, 1=invalid
+        # Also need keys file
+        keys_file = tmp_path / "m2_keys.json"
+        keys_file.write_text('{"metadata_verification_key": "012345678901234567890123456789AB", "default_encryption_key": "01234567890123456789012345678901"}')
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ['verify', str(test_file), '-k', str(keys_file)])
+
+        # Should complete without error (0=valid checksum, 1+ could be invalid)
+        assert result.exit_code == 0
 
 
 # ============================================================================

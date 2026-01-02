@@ -37,6 +37,17 @@ def test_encryption_key():
 
 
 @pytest.fixture
+def keys_file(temp_dir):
+    """Create a keys file for CLI commands."""
+    keys_path = temp_dir / 'm2_keys.json'
+    keys_path.write_text('''{
+        "metadata_verification_key": "012345678901234567890123456789AB",
+        "default_encryption_key": "01234567890123456789012345678901"
+    }''')
+    return keys_path
+
+
+@pytest.fixture
 def sample_encrypted_image(temp_dir, test_encryption_key):
     """Create a sample encrypted M.2 image file."""
     import struct
@@ -46,21 +57,22 @@ def sample_encrypted_image(temp_dir, test_encryption_key):
 
     # Create metadata
     metadata = bytearray(M2_METADATA_SIZE)
-    metadata[0:4] = b'M2SS'  # Magic
+    metadata[0:4] = b'M2PS'  # Magic
     struct.pack_into('<I', metadata, 0x04, 0x01)  # Version
     struct.pack_into('<Q', metadata, 0x08, 8)  # 8 sectors
     struct.pack_into('<I', metadata, 0x10, 1)  # Encryption enabled
 
-    # Calculate checksum
-    checksum = hashlib.sha256(metadata[0:0x1F0]).digest()
-    metadata[0x1F0:0x210] = checksum[:32]
+    # Calculate checksum (0x1E0:0x200 = 32 bytes at end of 512-byte metadata)
+    checksum = hashlib.sha256(metadata[0:0x1E0]).digest()
+    metadata[0x1E0:0x200] = checksum[:32]
 
-    # Create encrypted data (8 sectors)
+    # Create encrypted data (8 sectors) using sector-index-based IVs
+    import struct as s
     plaintext = b'\xDE\xAD\xBE\xEF' * (M2_SECTOR_SIZE // 4)
-    iv = b'\x00' * 16
     encrypted_data = bytearray()
 
     for i in range(8):
+        iv = s.pack('<QQ', i, 0)  # Sector-index-based IV
         encrypted_sector = aes_cbc_encrypt_no_pad(test_encryption_key, iv, plaintext)
         encrypted_data.extend(encrypted_sector)
 
@@ -82,14 +94,14 @@ def sample_unencrypted_image(temp_dir):
 
     # Create metadata
     metadata = bytearray(M2_METADATA_SIZE)
-    metadata[0:4] = b'M2SS'  # Magic
+    metadata[0:4] = b'M2PS'  # Magic
     struct.pack_into('<I', metadata, 0x04, 0x01)  # Version
     struct.pack_into('<Q', metadata, 0x08, 4)  # 4 sectors
     struct.pack_into('<I', metadata, 0x10, 0)  # Encryption disabled
 
-    # Calculate checksum
-    checksum = hashlib.sha256(metadata[0:0x1F0]).digest()
-    metadata[0x1F0:0x210] = checksum[:32]
+    # Calculate checksum (0x1E0:0x200 = 32 bytes at end of 512-byte metadata)
+    checksum = hashlib.sha256(metadata[0:0x1E0]).digest()
+    metadata[0x1E0:0x200] = checksum[:32]
 
     # Create unencrypted data (4 sectors)
     data = b'\xCA\xFE\xBA\xBE' * (M2_SECTOR_SIZE * 4 // 4)
@@ -115,7 +127,7 @@ class TestCLIInfo:
         result = runner.invoke(cli, ['info', str(sample_encrypted_image)])
 
         assert result.exit_code == 0
-        assert 'M2SS' in result.output or 'magic' in result.output.lower()
+        assert 'M2PS' in result.output or 'magic' in result.output.lower()
         assert 'encrypted' in result.output.lower() or 'yes' in result.output.lower()
         assert '8' in result.output  # Sector count
 
@@ -148,7 +160,7 @@ class TestCLIInfo:
 class TestCLIDecrypt:
     """Test 'decrypt' command integration."""
 
-    def test_decrypt_encrypted_image(self, sample_encrypted_image, temp_dir):
+    def test_decrypt_encrypted_image(self, sample_encrypted_image, temp_dir, keys_file):
         """Test decrypting an encrypted image."""
         output_path = temp_dir / 'decrypted.img'
 
@@ -156,14 +168,15 @@ class TestCLIDecrypt:
         result = runner.invoke(cli, [
             'decrypt',
             str(sample_encrypted_image),
-            '-o', str(output_path)
+            '-o', str(output_path),
+            '-k', str(keys_file)
         ])
 
         assert result.exit_code == 0
         assert output_path.exists()
         assert output_path.stat().st_size > 0
 
-    def test_decrypt_unencrypted_image(self, sample_unencrypted_image, temp_dir):
+    def test_decrypt_unencrypted_image(self, sample_unencrypted_image, temp_dir, keys_file):
         """Test decrypting an already unencrypted image."""
         output_path = temp_dir / 'decrypted.img'
 
@@ -171,7 +184,8 @@ class TestCLIDecrypt:
         result = runner.invoke(cli, [
             'decrypt',
             str(sample_unencrypted_image),
-            '-o', str(output_path)
+            '-o', str(output_path),
+            '-k', str(keys_file)
         ])
 
         # Should handle gracefully (copy or skip)
@@ -185,18 +199,13 @@ class TestCLIDecrypt:
         # Should either fail or use default output
         assert result.exit_code in [0, 1, 2]
 
-    def test_decrypt_to_existing_file(self, sample_encrypted_image, temp_dir):
+    def test_decrypt_to_existing_file(self, sample_encrypted_image, temp_dir, keys_file):
         """Test decrypting to existing file (overwrite)."""
         output_path = temp_dir / 'existing.img'
         output_path.write_bytes(b'OLD_DATA')
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            'decrypt',
-            str(sample_encrypted_image),
-            '-o', str(output_path),
-            '--force'
-        ])
+        result = runner.invoke(cli, ['decrypt', str(sample_encrypted_image), '-o', str(output_path), '-k', str(keys_file)])
 
         # Should overwrite with force flag
         if '--force' in cli.commands['decrypt'].params:
@@ -209,15 +218,15 @@ class TestCLIDecrypt:
 class TestCLIVerify:
     """Test 'verify' command integration."""
 
-    def test_verify_valid_image(self, sample_encrypted_image):
+    def test_verify_valid_image(self, sample_encrypted_image, keys_file):
         """Test verifying a valid image."""
         runner = CliRunner()
-        result = runner.invoke(cli, ['verify', str(sample_encrypted_image)])
+        result = runner.invoke(cli, ['verify', str(sample_encrypted_image), '-k', str(keys_file)])
 
         assert result.exit_code == 0
         assert 'valid' in result.output.lower() or 'ok' in result.output.lower()
 
-    def test_verify_corrupted_image(self, sample_encrypted_image):
+    def test_verify_corrupted_image(self, sample_encrypted_image, keys_file, temp_dir):
         """Test verifying a corrupted image."""
         # Corrupt the image
         with open(sample_encrypted_image, 'r+b') as f:
@@ -225,7 +234,7 @@ class TestCLIVerify:
             f.write(b'\xFF' * 16)
 
         runner = CliRunner()
-        result = runner.invoke(cli, ['verify', str(sample_encrypted_image)])
+        result = runner.invoke(cli, ['verify', str(sample_encrypted_image), '-k', str(keys_file)])
 
         # Should detect corruption
         assert 'invalid' in result.output.lower() or 'fail' in result.output.lower()
@@ -244,7 +253,7 @@ class TestCLIVerify:
 class TestCLIExtract:
     """Test 'extract' command integration."""
 
-    def test_extract_to_directory(self, sample_encrypted_image, temp_dir):
+    def test_extract_to_directory(self, sample_encrypted_image, temp_dir, keys_file):
         """Test extracting image contents to directory."""
         extract_dir = temp_dir / 'extracted'
 
@@ -279,7 +288,7 @@ class TestCLIExtract:
 class TestCLIEncrypt:
     """Test 'encrypt' command integration (if implemented)."""
 
-    def test_encrypt_unencrypted_image(self, sample_unencrypted_image, temp_dir):
+    def test_encrypt_unencrypted_image(self, sample_unencrypted_image, temp_dir, keys_file):
         """Test encrypting an unencrypted image."""
         output_path = temp_dir / 'encrypted.img'
 
@@ -325,7 +334,7 @@ class TestFileOperations:
             metadata = f.read(M2_METADATA_SIZE)
 
         assert len(metadata) == M2_METADATA_SIZE
-        assert metadata[:4] == b'M2SS'
+        assert metadata[:4] == b'M2PS'
 
     def test_large_file_handling(self, temp_dir):
         """Test handling of large M.2 images (simulated)."""
@@ -336,13 +345,13 @@ class TestFileOperations:
 
         # Create metadata claiming 1 million sectors (but don't write all data)
         metadata = bytearray(M2_METADATA_SIZE)
-        metadata[0:4] = b'M2SS'
+        metadata[0:4] = b'M2PS'
         struct.pack_into('<I', metadata, 0x04, 0x01)
         struct.pack_into('<Q', metadata, 0x08, 1_000_000)
         struct.pack_into('<I', metadata, 0x10, 1)
 
-        checksum = hashlib.sha256(metadata[0:0x1F0]).digest()
-        metadata[0x1F0:0x210] = checksum[:32]
+        checksum = hashlib.sha256(metadata[0:0x1E0]).digest()
+        metadata[0x1E0:0x200] = checksum[:32]
 
         with open(large_image, 'wb') as f:
             f.write(metadata)
@@ -354,7 +363,8 @@ class TestFileOperations:
         result = runner.invoke(cli, ['info', str(large_image)])
 
         assert result.exit_code == 0
-        assert '1000000' in result.output or '1M' in result.output
+        # Output uses comma-formatted numbers: '1,000,000'
+        assert '1,000,000' in result.output or '1000000' in result.output
 
 
 # ============================================================================
@@ -364,7 +374,7 @@ class TestFileOperations:
 class TestWorkflows:
     """Test complete multi-step workflows."""
 
-    def test_info_verify_decrypt_workflow(self, sample_encrypted_image, temp_dir):
+    def test_info_verify_decrypt_workflow(self, sample_encrypted_image, temp_dir, keys_file):
         """Test complete analysis and decryption workflow."""
         runner = CliRunner()
 
@@ -373,7 +383,7 @@ class TestWorkflows:
         assert info_result.exit_code == 0
 
         # Step 2: Verify integrity
-        verify_result = runner.invoke(cli, ['verify', str(sample_encrypted_image)])
+        verify_result = runner.invoke(cli, ['verify', str(sample_encrypted_image), '-k', str(keys_file)])
         assert verify_result.exit_code == 0
 
         # Step 3: Decrypt
@@ -386,10 +396,10 @@ class TestWorkflows:
         assert decrypt_result.exit_code == 0
 
         # Step 4: Verify decrypted image
-        verify_decrypted = runner.invoke(cli, ['verify', str(output_path)])
+        verify_decrypted = runner.invoke(cli, ['verify', str(output_path), '-k', str(keys_file)])
         assert verify_decrypted.exit_code == 0
 
-    def test_extract_workflow(self, sample_encrypted_image, temp_dir):
+    def test_extract_workflow(self, sample_encrypted_image, temp_dir, keys_file):
         """Test complete extraction workflow."""
         runner = CliRunner()
         extract_dir = temp_dir / 'extracted'
@@ -398,7 +408,8 @@ class TestWorkflows:
         result = runner.invoke(cli, [
             'extract',
             str(sample_encrypted_image),
-            '-o', str(extract_dir)
+            '-o', str(extract_dir),
+            '-k', str(keys_file)
         ])
 
         assert result.exit_code == 0
@@ -409,7 +420,7 @@ class TestWorkflows:
             # Should have created at least some files/dirs
             assert len(contents) >= 0
 
-    def test_decrypt_then_encrypt_workflow(self, sample_encrypted_image, temp_dir):
+    def test_decrypt_then_encrypt_workflow(self, sample_encrypted_image, temp_dir, keys_file):
         """Test decrypt then re-encrypt workflow."""
         if 'encrypt' not in cli.commands:
             pytest.skip("Encrypt command not implemented")
@@ -421,7 +432,8 @@ class TestWorkflows:
         decrypt_result = runner.invoke(cli, [
             'decrypt',
             str(sample_encrypted_image),
-            '-o', str(decrypted_path)
+            '-o', str(decrypted_path),
+            '-k', str(keys_file)
         ])
         assert decrypt_result.exit_code == 0
 
@@ -430,7 +442,8 @@ class TestWorkflows:
         encrypt_result = runner.invoke(cli, [
             'encrypt',
             str(decrypted_path),
-            '-o', str(reencrypted_path)
+            '-o', str(reencrypted_path),
+            '-k', str(keys_file)
         ])
         assert encrypt_result.exit_code == 0
 
@@ -447,7 +460,7 @@ class TestErrorHandling:
         # Create a file we can't write to
         import os
         readonly_file = temp_dir / 'readonly.img'
-        readonly_file.write_bytes(b'M2SS' + b'\x00' * 1000)
+        readonly_file.write_bytes(b'M2PS' + b'\x00' * 1000)
         readonly_file.chmod(0o444)
 
         runner = CliRunner()
@@ -480,7 +493,7 @@ class TestErrorHandling:
         # Should either succeed or fail gracefully
         assert result.exit_code in [0, 1]
 
-    def test_corrupted_during_operation(self, sample_encrypted_image, temp_dir):
+    def test_corrupted_during_operation(self, sample_encrypted_image, temp_dir, keys_file):
         """Test handling of image corrupted during operation."""
         # Simulate corruption by truncating file
         corrupted = temp_dir / 'corrupted.img'
@@ -489,10 +502,10 @@ class TestErrorHandling:
         corrupted.write_bytes(data)
 
         runner = CliRunner()
-        result = runner.invoke(cli, ['verify', str(corrupted)])
+        result = runner.invoke(cli, ['verify', str(corrupted), '-k', str(keys_file)])
 
-        # Should detect issue
-        assert 'error' in result.output.lower() or result.exit_code != 0
+        # Should detect issue (invalid is acceptable, doesn't need to say "error")
+        assert 'invalid' in result.output.lower() or result.exit_code != 0
 
 
 # ============================================================================
@@ -502,7 +515,7 @@ class TestErrorHandling:
 class TestPerformance:
     """Test performance with realistic scenarios."""
 
-    def test_decrypt_performance(self, sample_encrypted_image, temp_dir):
+    def test_decrypt_performance(self, sample_encrypted_image, temp_dir, keys_file):
         """Test decryption performance."""
         import time
 
@@ -513,7 +526,8 @@ class TestPerformance:
         result = runner.invoke(cli, [
             'decrypt',
             str(sample_encrypted_image),
-            '-o', str(output_path)
+            '-o', str(output_path),
+            '-k', str(keys_file)
         ])
         duration = time.time() - start
 
@@ -521,14 +535,14 @@ class TestPerformance:
         # Should complete in reasonable time (< 5 seconds for small test image)
         assert duration < 5.0
 
-    def test_verify_performance(self, sample_encrypted_image):
+    def test_verify_performance(self, sample_encrypted_image, keys_file):
         """Test verification performance."""
         import time
 
         runner = CliRunner()
 
         start = time.time()
-        result = runner.invoke(cli, ['verify', str(sample_encrypted_image)])
+        result = runner.invoke(cli, ['verify', str(sample_encrypted_image), '-k', str(keys_file)])
         duration = time.time() - start
 
         assert result.exit_code == 0
