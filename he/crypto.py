@@ -112,3 +112,85 @@ def rsa_verify_pkcs1v15(public_key: RSA.RsaKey, data: bytes, signature: bytes) -
 def rsa_construct_from_crt(n: int, e: int, d: int, p: int, q: int) -> RSA.RsaKey:
     """Construct RSA key from CRT parameters."""
     return RSA.construct((n, e, d, p, q))
+
+
+def aes_ecb_decrypt(key: bytes, data: bytes) -> bytes:
+    """
+    AES-128-ECB decryption (no IV).
+
+    WARNING: ECB mode is cryptographically weak as it doesn't use an IV.
+    Identical plaintext blocks produce identical ciphertext blocks.
+    Only use when required by protocol specification (e.g., M.2 metadata).
+
+    Args:
+        key: 16-byte AES-128 key
+        data: Data to decrypt (must be 16-byte aligned)
+
+    Returns:
+        Decrypted data
+
+    Raises:
+        ValueError: If data is not 16-byte aligned
+    """
+    if len(data) % 16 != 0:
+        raise ValueError(f"Data must be 16-byte aligned, got {len(data)} bytes")
+    if len(key) != 16:
+        raise ValueError(f"Key must be 16 bytes for AES-128, got {len(key)} bytes")
+
+    cipher = AES.new(key, AES.MODE_ECB)
+    return cipher.decrypt(data)
+
+
+def aes_ecb_encrypt(key: bytes, data: bytes) -> bytes:
+    """
+    AES-128-ECB encryption (no IV).
+
+    WARNING: ECB mode is cryptographically weak. Use only when required
+    by protocol specification.
+
+    Args:
+        key: 16-byte AES-128 key
+        data: Data to encrypt (must be 16-byte aligned)
+
+    Returns:
+        Encrypted data
+
+    Raises:
+        ValueError: If data is not 16-byte aligned
+    """
+    if len(data) % 16 != 0:
+        raise ValueError(f"Data must be 16-byte aligned, got {len(data)} bytes")
+    if len(key) != 16:
+        raise ValueError(f"Key must be 16 bytes for AES-128, got {len(key)} bytes")
+
+    cipher = AES.new(key, AES.MODE_ECB)
+    return cipher.encrypt(data)
+
+
+def constant_time_compare(a: bytes, b: bytes) -> bool:
+    """
+    Constant-time byte comparison to prevent timing attacks.
+
+    This function compares two byte sequences in constant time,
+    preventing timing side-channel attacks when comparing secrets
+    like HMACs, passwords, or verification keys.
+
+    Args:
+        a: First byte sequence
+        b: Second byte sequence
+
+    Returns:
+        True if sequences are equal, False otherwise
+
+    Security Note:
+        Always use this function when comparing cryptographic values
+        to prevent timing-based information leakage.
+    """
+    if len(a) != len(b):
+        return False
+
+    result = 0
+    for x, y in zip(a, b):
+        result |= x ^ y
+
+    return result == 0

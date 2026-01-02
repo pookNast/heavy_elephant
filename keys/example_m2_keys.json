@@ -1,0 +1,11 @@
+{
+  "_comment": "Example PS5 M.2 SSD encryption keys - replace with actual keys for research",
+  "_security_note": "CRITICAL: These keys are documented as HARDCODED in PS5 firmware (all versions)",
+  "_source": "PSDevWiki PS5 M.2 encryption research",
+
+  "metadata_verification_key": "012345678901234567890123456789AB",
+  "default_encryption_key": "01234567890123456789012345678901",
+
+  "_usage_note": "Copy to m2_keys.json and ensure file permissions are 600",
+  "_security_warning": "These are the actual documented keys - handle according to your jurisdiction's research laws"
+}
